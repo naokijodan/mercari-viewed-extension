@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "メルカリ閲覧済みチェッカー",
+  "version": "1.0",
+  "description": "メルカリで以前閲覧した商品を検索一覧でマークします",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["https://jp.mercari.com/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"]
+    }
+  ]
+}

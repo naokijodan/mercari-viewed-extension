@@ -1,0 +1,57 @@
+/* 閲覧済み商品のマーク */
+.mercari-viewed-marked {
+  position: relative;
+}
+
+/* 閲覧済みバッジ */
+.mercari-viewed-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background-color: rgba(255, 87, 34, 0.9);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: bold;
+  z-index: 100;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  pointer-events: auto;
+  cursor: default;
+}
+
+/* 閲覧済み商品の画像を少し薄く */
+.mercari-viewed-marked img {
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+/* ホバー時は元に戻す */
+.mercari-viewed-marked:hover img {
+  opacity: 1;
+}
+
+/* 閲覧済み商品の枠線 */
+.mercari-viewed-marked {
+  outline: 3px solid rgba(255, 87, 34, 0.6);
+  outline-offset: -3px;
+}
+
+/* 商品ページ用バッジ（タイトルの上） */
+.mercari-viewed-page-badge {
+  background-color: #FF5722;
+  color: white;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 12px;
+  display: inline-block;
+  box-shadow: 0 2px 6px rgba(255, 87, 34, 0.3);
+}
+
+.mercari-viewed-date {
+  font-weight: normal;
+  font-size: 12px;
+  opacity: 0.9;
+}
