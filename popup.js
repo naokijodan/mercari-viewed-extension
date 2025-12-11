@@ -1,0 +1,99 @@
+const STORAGE_KEY = 'mercari_viewed_items';
+const MAX_ITEMS = 10000;
+
+// 商品IDをURLまたはIDから抽出
+function extractItemId(input) {
+  input = input.trim();
+  // URLからID抽出
+  const urlMatch = input.match(/\/item\/([a-zA-Z0-9]+)/);
+  if (urlMatch) {
+    return urlMatch[1];
+  }
+  // IDのみの場合（mで始まる英数字）
+  if (/^m[a-zA-Z0-9]+$/.test(input)) {
+    return input;
+  }
+  return null;
+}
+
+// 閲覧済み商品を取得
+async function getViewedItems() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get([STORAGE_KEY], (result) => {
+      resolve(result[STORAGE_KEY] || {});
+    });
+  });
+}
+
+// 件数を更新
+async function updateCount() {
+  const viewedItems = await getViewedItems();
+  document.getElementById('count').textContent = Object.keys(viewedItems).length;
+}
+
+// ステータス表示
+function showStatus(message, isError = false) {
+  const status = document.getElementById('status');
+  status.textContent = message;
+  status.className = 'status ' + (isError ? 'error' : 'success');
+  setTimeout(() => {
+    status.className = 'status';
+  }, 3000);
+}
+
+// 登録処理
+async function registerItems() {
+  const input = document.getElementById('itemIds').value;
+  const lines = input.split('\n').filter(line => line.trim());
+
+  if (lines.length === 0) {
+    showStatus('IDまたはURLを入力してください', true);
+    return;
+  }
+
+  const viewedItems = await getViewedItems();
+  let addedCount = 0;
+  let skippedCount = 0;
+  let invalidCount = 0;
+
+  for (const line of lines) {
+    const itemId = extractItemId(line);
+    if (itemId) {
+      if (!viewedItems[itemId]) {
+        viewedItems[itemId] = Date.now();
+        addedCount++;
+      } else {
+        skippedCount++;
+      }
+    } else {
+      invalidCount++;
+    }
+  }
+
+  // 上限チェック
+  const keys = Object.keys(viewedItems);
+  while (keys.length > MAX_ITEMS) {
+    const oldestKey = keys.reduce((oldest, key) =>
+      viewedItems[key] < viewedItems[oldest] ? key : oldest
+    );
+    delete viewedItems[oldestKey];
+    keys.splice(keys.indexOf(oldestKey), 1);
+  }
+
+  await chrome.storage.local.set({ [STORAGE_KEY]: viewedItems });
+
+  // 結果表示
+  let message = `${addedCount}件を登録しました`;
+  if (skippedCount > 0) message += `（${skippedCount}件は登録済み）`;
+  if (invalidCount > 0) message += `（${invalidCount}件は無効なID）`;
+
+  showStatus(message, invalidCount > 0 && addedCount === 0);
+  document.getElementById('itemIds').value = '';
+  updateCount();
+}
+
+// イベント設定
+document.getElementById('registerBtn').addEventListener('click', registerItems);
+
+// 初期化
+updateCount();
