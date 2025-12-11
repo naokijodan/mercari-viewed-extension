@@ -105,17 +105,5 @@ async function registerItems() {
 // イベント設定
 document.getElementById('registerBtn').addEventListener('click', registerItems);
 
-// デバッグ用：登録済みIDを確認
-async function showDebugInfo() {
-  const viewedItems = await getViewedItems();
-  const ids = Object.keys(viewedItems);
-  console.log('登録済みID:', ids);
-  console.log('件数:', ids.length);
-  if (ids.length > 0) {
-    console.log('最初の5件:', ids.slice(0, 5));
-  }
-}
-
 // 初期化
 updateCount();
-showDebugInfo();

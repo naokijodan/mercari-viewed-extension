@@ -105,12 +105,9 @@
     }
 
     const viewedItems = await getViewedItems();
-    const viewedIds = Object.keys(viewedItems);
-    console.log('[メルカリ閲覧済み] 登録済みID数:', viewedIds.length);
 
     // 商品リンクを取得（通常商品 + ショップ商品）
     const productLinks = document.querySelectorAll('a[href*="/item/"], a[href*="/shops/product/"]');
-    console.log('[メルカリ閲覧済み] ページ内の商品リンク数:', productLinks.length);
 
     productLinks.forEach((link) => {
       const itemId = extractItemId(link.href);
