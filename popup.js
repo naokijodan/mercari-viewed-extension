@@ -1,5 +1,5 @@
 const STORAGE_KEY = 'mercari_viewed_items';
-const MAX_ITEMS = 10000;
+const MAX_ITEMS = 100000;
 
 // 商品IDをURLまたはIDから抽出
 function extractItemId(input) {

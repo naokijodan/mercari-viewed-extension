@@ -3,7 +3,7 @@
   'use strict';
 
   const STORAGE_KEY = 'mercari_viewed_items';
-  const MAX_ITEMS = 10000; // 最大保存件数
+  const MAX_ITEMS = 100000; // 最大保存件数
 
   // 商品IDをURLから抽出（通常商品 + メルカリショップ対応）
   function extractItemId(url) {
