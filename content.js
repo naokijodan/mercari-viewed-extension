@@ -77,35 +77,25 @@
     }
   }
 
-  // 商品ページでタイトルの上にバッジを表示
+  // 商品ページでフローティングバッジを表示
   function showBadgeOnProductPage(viewedTimestamp) {
     // 既にバッジがあれば何もしない
     if (document.querySelector('.mercari-viewed-page-badge')) {
       return;
     }
 
-    // 商品タイトルを探す
-    const findTitleAndInsert = () => {
-      const titleElement = document.querySelector('[data-testid="name"]') ||
-                          document.querySelector('h1') ||
-                          document.querySelector('[class*="itemName"]');
+    const badge = document.createElement('div');
+    badge.className = 'mercari-viewed-page-badge';
 
-      if (titleElement && !document.querySelector('.mercari-viewed-page-badge')) {
-        const badge = document.createElement('div');
-        badge.className = 'mercari-viewed-page-badge';
-        badge.textContent = '以前閲覧した商品です';
+    const viewedDate = new Date(viewedTimestamp);
+    badge.innerHTML = `以前閲覧した商品です<span class="mercari-viewed-date">（${viewedDate.toLocaleDateString('ja-JP')} ${viewedDate.toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit'})}）</span><button class="mercari-viewed-close">✕</button>`;
 
-        const viewedDate = new Date(viewedTimestamp);
-        badge.innerHTML = `以前閲覧した商品です<span class="mercari-viewed-date">（${viewedDate.toLocaleDateString('ja-JP')} ${viewedDate.toLocaleTimeString('ja-JP', {hour: '2-digit', minute: '2-digit'})}）</span>`;
+    document.body.appendChild(badge);
 
-        titleElement.parentNode.insertBefore(badge, titleElement);
-      }
-    };
-
-    // すぐに試行し、DOMが準備できていなければ遅延して再試行
-    findTitleAndInsert();
-    setTimeout(findTitleAndInsert, 500);
-    setTimeout(findTitleAndInsert, 1500);
+    // 閉じるボタンのイベント
+    badge.querySelector('.mercari-viewed-close').addEventListener('click', () => {
+      badge.remove();
+    });
   }
 
   // 商品ページかどうかを判定

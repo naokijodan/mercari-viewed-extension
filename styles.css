@@ -37,21 +37,57 @@
   outline-offset: -3px;
 }
 
-/* 商品ページ用バッジ（タイトルの上） */
+/* 商品ページ用バッジ（フローティング固定） */
 .mercari-viewed-page-badge {
+  position: fixed;
+  top: 80px;
+  left: 50%;
+  transform: translateX(-50%);
   background-color: #FF5722;
   color: white;
-  padding: 10px 16px;
-  border-radius: 6px;
-  font-size: 14px;
+  padding: 14px 28px;
+  padding-right: 48px;
+  border-radius: 8px;
+  font-size: 18px;
   font-weight: bold;
-  margin-bottom: 12px;
-  display: inline-block;
-  box-shadow: 0 2px 6px rgba(255, 87, 34, 0.3);
+  z-index: 999999;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    top: 10px;
+    opacity: 0;
+  }
+  to {
+    top: 80px;
+    opacity: 1;
+  }
 }
 
 .mercari-viewed-date {
   font-weight: normal;
-  font-size: 12px;
+  font-size: 14px;
   opacity: 0.9;
+}
+
+/* 閉じるボタン */
+.mercari-viewed-close {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: white;
+  font-size: 20px;
+  cursor: pointer;
+  opacity: 0.8;
+  padding: 0;
+  line-height: 1;
+}
+
+.mercari-viewed-close:hover {
+  opacity: 1;
 }
