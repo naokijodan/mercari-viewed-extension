@@ -16,12 +16,12 @@
 
   // 商品IDをURLから抽出（各サイト対応）
   function extractItemId(url) {
-    // メルカリ通常: /item/m12345678901（IDのみ）
-    const mercariMatch = url.match(/jp\.mercari\.com\/item\/([a-zA-Z0-9]+)/);
-    if (mercariMatch) return mercariMatch[1];
+    // メルカリ通常: /item/m12345678901（IDのみ）※相対パス・フルURL両対応
+    const mercariMatch = url.match(/\/item\/([a-zA-Z0-9]+)/);
+    if (mercariMatch && !url.includes('rakuten.co.jp')) return mercariMatch[1];
 
     // メルカリショップ: /shops/product/xxxxx（shop_プレフィックス）
-    const mercariShopMatch = url.match(/jp\.mercari\.com\/shops\/product\/([a-zA-Z0-9]+)/);
+    const mercariShopMatch = url.match(/\/shops\/product\/([a-zA-Z0-9]+)/);
     if (mercariShopMatch) return 'shop_' + mercariShopMatch[1];
 
     // ラクマ: item.fril.jp/xxxxx（IDのみ）
@@ -122,7 +122,7 @@
 
     // 商品リンクを取得（各サイト対応）
     const productLinks = document.querySelectorAll(
-      'a[href*="mercari.com/item/"], a[href*="mercari.com/shops/product/"], ' +
+      'a[href*="/item/"], a[href*="/shops/product/"], ' +
       'a[href*="item.fril.jp/"], a[href*="item.rakuten.co.jp/"]'
     );
 
