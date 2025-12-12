@@ -5,22 +5,25 @@ const MAX_ITEMS = 100000;
 function extractItemId(input) {
   input = input.trim();
 
-  // 通常商品URL: /item/m12345678901
-  const itemMatch = input.match(/\/item\/([a-zA-Z0-9]+)/);
-  if (itemMatch) return itemMatch[1];
+  // メルカリ通常: /item/m12345678901
+  const mercariMatch = input.match(/jp\.mercari\.com\/item\/([a-zA-Z0-9]+)/);
+  if (mercariMatch) return 'mercari_' + mercariMatch[1];
 
-  // メルカリショップURL: /shops/product/xxxx
-  const shopMatch = input.match(/\/shops\/product\/([a-zA-Z0-9]+)/);
-  if (shopMatch) return 'shop_' + shopMatch[1];
+  // メルカリショップ: /shops/product/xxxxx
+  const mercariShopMatch = input.match(/jp\.mercari\.com\/shops\/product\/([a-zA-Z0-9]+)/);
+  if (mercariShopMatch) return 'mercari_shop_' + mercariShopMatch[1];
 
-  // IDのみの場合（mで始まる通常商品ID）
+  // ラクマ: item.fril.jp/xxxxx
+  const rakumaMatch = input.match(/item\.fril\.jp\/([a-zA-Z0-9]+)/);
+  if (rakumaMatch) return 'rakuma_' + rakumaMatch[1];
+
+  // 楽天市場: item.rakuten.co.jp/shop/product/
+  const rakutenMatch = input.match(/item\.rakuten\.co\.jp\/([^?#]+)/);
+  if (rakutenMatch) return 'rakuten_' + rakutenMatch[1].replace(/\/$/, '');
+
+  // IDのみの場合（mで始まるメルカリ商品ID）
   if (/^m[a-zA-Z0-9]+$/.test(input)) {
-    return input;
-  }
-
-  // ショップ商品ID（shop_プレフィックスなし）
-  if (/^[a-zA-Z0-9]{20,}$/.test(input)) {
-    return 'shop_' + input;
+    return 'mercari_' + input;
   }
 
   return null;

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "フリマ閲覧済みチェッカー",
-  "version": "1.3",
-  "description": "フリマサイトで以前閲覧した商品を検索一覧でマークします（メルカリ対応）",
+  "version": "1.4",
+  "description": "フリマサイトで以前閲覧した商品を検索一覧でマークします",
   "permissions": ["storage"],
   "action": {
     "default_popup": "popup.html",
@@ -18,7 +18,11 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://jp.mercari.com/*"],
+      "matches": [
+        "https://jp.mercari.com/*",
+        "https://*.fril.jp/*",
+        "https://*.rakuten.co.jp/*"
+      ],
       "js": ["content.js"],
       "css": ["styles.css"]
     }

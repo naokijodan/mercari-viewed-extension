@@ -1,19 +1,36 @@
-// メルカリ閲覧済みチェッカー
+// フリマ閲覧済みチェッカー
 (function() {
   'use strict';
 
   const STORAGE_KEY = 'mercari_viewed_items';
   const MAX_ITEMS = 100000; // 最大保存件数
 
-  // 商品IDをURLから抽出（通常商品 + メルカリショップ対応）
-  function extractItemId(url) {
-    // 通常の商品ページ: /item/m12345678901
-    const itemMatch = url.match(/\/item\/([a-zA-Z0-9]+)/);
-    if (itemMatch) return itemMatch[1];
+  // 現在のサイトを判定
+  function getCurrentSite() {
+    const host = window.location.hostname;
+    if (host.includes('mercari.com')) return 'mercari';
+    if (host.includes('fril.jp')) return 'rakuma';
+    if (host.includes('rakuten.co.jp')) return 'rakuten';
+    return null;
+  }
 
-    // メルカリショップ: /shops/product/bcmce8YpgYf9KFCeBkASQa
-    const shopMatch = url.match(/\/shops\/product\/([a-zA-Z0-9]+)/);
-    if (shopMatch) return 'shop_' + shopMatch[1];
+  // 商品IDをURLから抽出（各サイト対応）
+  function extractItemId(url) {
+    // メルカリ通常: /item/m12345678901
+    const mercariMatch = url.match(/jp\.mercari\.com\/item\/([a-zA-Z0-9]+)/);
+    if (mercariMatch) return 'mercari_' + mercariMatch[1];
+
+    // メルカリショップ: /shops/product/xxxxx
+    const mercariShopMatch = url.match(/jp\.mercari\.com\/shops\/product\/([a-zA-Z0-9]+)/);
+    if (mercariShopMatch) return 'mercari_shop_' + mercariShopMatch[1];
+
+    // ラクマ: item.fril.jp/xxxxx
+    const rakumaMatch = url.match(/item\.fril\.jp\/([a-zA-Z0-9]+)/);
+    if (rakumaMatch) return 'rakuma_' + rakumaMatch[1];
+
+    // 楽天市場: item.rakuten.co.jp/shop/product/
+    const rakutenMatch = url.match(/item\.rakuten\.co\.jp\/([^?#]+)/);
+    if (rakutenMatch) return 'rakuten_' + rakutenMatch[1].replace(/\/$/, '');
 
     return null;
   }
@@ -91,10 +108,17 @@
     setTimeout(findTitleAndInsert, 1500);
   }
 
-  // 商品ページかどうかを判定（通常 + ショップ）
+  // 商品ページかどうかを判定
   function isProductPage() {
-    return /\/item\/[a-zA-Z0-9]+/.test(window.location.pathname) ||
-           /\/shops\/product\/[a-zA-Z0-9]+/.test(window.location.pathname);
+    const url = window.location.href;
+    // メルカリ
+    if (/jp\.mercari\.com\/item\//.test(url)) return true;
+    if (/jp\.mercari\.com\/shops\/product\//.test(url)) return true;
+    // ラクマ
+    if (/item\.fril\.jp\/[a-zA-Z0-9]+/.test(url)) return true;
+    // 楽天市場
+    if (/item\.rakuten\.co\.jp\//.test(url)) return true;
+    return false;
   }
 
   // 検索一覧の商品にマークを付ける（商品ページでは実行しない）
@@ -106,8 +130,11 @@
 
     const viewedItems = await getViewedItems();
 
-    // 商品リンクを取得（通常商品 + ショップ商品）
-    const productLinks = document.querySelectorAll('a[href*="/item/"], a[href*="/shops/product/"]');
+    // 商品リンクを取得（各サイト対応）
+    const productLinks = document.querySelectorAll(
+      'a[href*="mercari.com/item/"], a[href*="mercari.com/shops/product/"], ' +
+      'a[href*="item.fril.jp/"], a[href*="item.rakuten.co.jp/"]'
+    );
 
     productLinks.forEach((link) => {
       const itemId = extractItemId(link.href);
