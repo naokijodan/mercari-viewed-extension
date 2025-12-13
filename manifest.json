@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
-  "name": "閲覧済み商品チェッカー",
-  "version": "1.5",
+  "name": "みちゃった君",
+  "version": "1.6",
   "description": "以前閲覧した商品を検索一覧でマークします",
   "permissions": ["storage"],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "閲覧済み商品チェッカー",
+    "default_title": "みちゃった君",
     "default_icon": {
       "48": "icons/icon48.png",
       "128": "icons/icon128.png"
