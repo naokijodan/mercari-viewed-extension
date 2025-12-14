@@ -123,14 +123,17 @@
     return false;
   }
 
-  // 検索一覧の商品にマークを付ける（商品ページ・除外ページでは実行しない）
+  // 検索一覧の商品にマークを付ける（除外ページでは実行しない）
   async function markViewedItemsInList() {
-    // 商品ページ・除外ページでは一覧用バッジを表示しない
-    if (isProductPage() || isExcludedPage()) {
+    // 除外ページでは一覧用バッジを表示しない
+    if (isExcludedPage()) {
       return;
     }
 
     const viewedItems = await getViewedItems();
+
+    // 現在のページの商品IDを取得（商品ページの場合、自分自身にはバッジを付けない）
+    const currentItemId = extractItemId(window.location.href);
 
     // 商品リンクを取得（各サイト対応）
     const productLinks = document.querySelectorAll(
@@ -140,7 +143,8 @@
 
     productLinks.forEach((link) => {
       const itemId = extractItemId(link.href);
-      if (itemId && viewedItems[itemId]) {
+      // 現在のページの商品は除外
+      if (itemId && itemId !== currentItemId && viewedItems[itemId]) {
         // 親要素（商品カード）を探す
         const card = link.closest('[data-testid="item-cell"]') ||
                      link.closest('li') ||
