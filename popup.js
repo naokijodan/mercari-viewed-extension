@@ -139,7 +139,13 @@ async function saveAlertSettings() {
   };
 
   await chrome.storage.local.set({ [ALERT_SETTINGS_KEY]: settings });
-  showStatus('設定を保存しました');
+  // アラート設定用のステータス表示
+  const alertStatus = document.getElementById('alertStatus');
+  alertStatus.textContent = '設定を保存しました';
+  alertStatus.className = 'status success';
+  setTimeout(() => {
+    alertStatus.className = 'status';
+  }, 3000);
 }
 
 // アラート設定をUIに反映
