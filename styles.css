@@ -37,6 +37,11 @@
   outline-offset: -3px;
 }
 
+/* PayPayフリマ検索結果: aタグがカードの場合のスタイル */
+a.mercari-viewed-marked {
+  display: block;
+}
+
 /* 商品ページ用バッジ（フローティング固定） */
 .mercari-viewed-page-badge {
   position: fixed;

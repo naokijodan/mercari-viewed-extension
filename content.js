@@ -228,6 +228,7 @@
 
   // 検索一覧の商品にマークを付ける（除外ページでは実行しない）
   async function markViewedItemsInList() {
+
     // チェック用タブや除外ページでは実行しない
     if (isCheckTab || isExcludedPage()) {
       return;
@@ -250,12 +251,23 @@
       const itemId = extractItemId(link.href);
       // 現在のページの商品は除外
       if (itemId && itemId !== currentItemId && viewedItems[itemId]) {
+        // PayPayフリマ検索ページ判定
+        const isPayPaySearch = window.location.hostname.includes('paypayfleamarket.yahoo.co.jp') &&
+                               window.location.pathname.includes('/search/');
+
         // 親要素（商品カード）を探す
-        const card = link.closest('[data-testid="item-cell"]') ||
-                     link.closest('.Product') ||  // ヤフオク
-                     link.closest('.cf') ||       // ヤフオク検索結果
-                     link.closest('li') ||
-                     link.parentElement;
+        let card;
+        if (isPayPaySearch) {
+          // PayPayフリマの検索結果はリンク自体が商品カード
+          card = link;
+        } else {
+          card = link.closest('[data-testid="item-cell"]') ||  // メルカリ
+                 link.closest('li.Product') ||  // ヤフオク（検索結果）
+                 link.closest('.Product') ||    // ヤフオク
+                 link.closest('.cf') ||         // ヤフオク検索結果（旧）
+                 link.closest('li[class*="item"]') ||  // 汎用
+                 link.parentElement;
+        }
 
         if (card && !card.classList.contains('mercari-viewed-marked')) {
           card.classList.add('mercari-viewed-marked');

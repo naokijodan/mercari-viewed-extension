@@ -25,6 +25,7 @@
         "https://jp.mercari.com/*",
         "https://*.fril.jp/*",
         "https://*.rakuten.co.jp/*",
+        "https://auctions.yahoo.co.jp/*",
         "https://*.auctions.yahoo.co.jp/*",
         "https://page.auctions.yahoo.co.jp/*",
         "https://paypayfleamarket.yahoo.co.jp/*"
