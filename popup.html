@@ -172,12 +172,17 @@
   <div class="section">
     <label for="itemIds">商品IDを登録</label>
     <textarea id="itemIds" placeholder="商品URLを入力&#10;例: https://jp.mercari.com/item/m12345678901&#10;例: https://item.fril.jp/xxxxx&#10;例: https://item.rakuten.co.jp/shop/product/&#10;&#10;複数行で複数登録可能"></textarea>
-    <div class="hint">メルカリ・ラクマ・楽天市場対応</div>
+    <div class="hint">メルカリ・ラクマ・楽天市場・ヤフオク・ヤフフリ対応</div>
   </div>
 
   <button id="registerBtn">登録する</button>
 
   <div id="status" class="status"></div>
+
+  <div class="stats" style="margin-top: 12px; margin-bottom: 0; padding-top: 0; border-top: none;">
+    登録済み: <span id="count">0</span> 件
+    <button id="clearAllBtn" style="width: auto; padding: 4px 8px; font-size: 11px; background-color: #f44336; margin-left: 12px;">全削除</button>
+  </div>
 
   <h2>会員専用機能</h2>
 
@@ -246,10 +251,7 @@
 
   </div><!-- alertSettings -->
 
-  <div class="stats">
-    登録済み: <span id="count">0</span> 件
-  </div>
-
+  <script src="storage.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -1,8 +1,4 @@
-const STORAGE_KEY = 'mercari_viewed_items';
-const ALERT_SETTINGS_KEY = 'mercari_alert_settings';
-const PREMIUM_KEY = 'mercari_premium_unlocked';
 const PREMIUM_PASS = 'MGOOSE2025';
-const MAX_ITEMS = 100000;
 
 // デフォルトのアラート設定
 const DEFAULT_ALERT_SETTINGS = {
@@ -14,9 +10,17 @@ const DEFAULT_ALERT_SETTINGS = {
   shipping8: false
 };
 
+// ストレージ初期化待ち
+let storageReady = false;
+
 // 商品IDをURLまたはIDから抽出
 function extractItemId(input) {
   input = input.trim();
+
+  // PayPayフリマ: paypayfleamarket.yahoo.co.jp/item/z491889774
+  // ※メルカリより先に判定
+  const paypayMatch = input.match(/paypayfleamarket\.yahoo\.co\.jp\/item\/([a-zA-Z0-9]+)/);
+  if (paypayMatch) return 'paypay_' + paypayMatch[1];
 
   // メルカリ通常: /item/m12345678901（IDのみ）
   const mercariMatch = input.match(/jp\.mercari\.com\/item\/([a-zA-Z0-9]+)/);
@@ -34,6 +38,14 @@ function extractItemId(input) {
   const rakutenMatch = input.match(/item\.rakuten\.co\.jp\/([^?#]+)/);
   if (rakutenMatch) return 'rakuten_' + rakutenMatch[1].replace(/\/$/, '');
 
+  // ヤフオク: page.auctions.yahoo.co.jp/jp/auction/xxxxx
+  const yahooAuctionMatch = input.match(/page\.auctions\.yahoo\.co\.jp\/jp\/auction\/([a-zA-Z0-9]+)/);
+  if (yahooAuctionMatch) return 'yahoo_' + yahooAuctionMatch[1];
+
+  // ヤフオク: auctions.yahoo.co.jp系
+  const yahooSearchMatch = input.match(/auctions\.yahoo\.co\.jp.*\/([a-zA-Z0-9]{10,})/);
+  if (yahooSearchMatch) return 'yahoo_' + yahooSearchMatch[1];
+
   // IDのみの場合（mで始まるメルカリ商品ID）
   if (/^m[a-zA-Z0-9]+$/.test(input)) {
     return input;
@@ -42,19 +54,11 @@ function extractItemId(input) {
   return null;
 }
 
-// 閲覧済み商品を取得
-async function getViewedItems() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get([STORAGE_KEY], (result) => {
-      resolve(result[STORAGE_KEY] || {});
-    });
-  });
-}
-
 // 件数を更新
 async function updateCount() {
-  const viewedItems = await getViewedItems();
-  document.getElementById('count').textContent = Object.keys(viewedItems).length;
+  if (!storageReady) return;
+  const count = await window.MichattaStorage.getViewedItemsCount();
+  document.getElementById('count').textContent = count;
 }
 
 // ステータス表示
@@ -77,7 +81,7 @@ async function registerItems() {
     return;
   }
 
-  const viewedItems = await getViewedItems();
+  const viewedItems = await window.MichattaStorage.getViewedItems();
   let addedCount = 0;
   let skippedCount = 0;
   let invalidCount = 0;
@@ -96,17 +100,8 @@ async function registerItems() {
     }
   }
 
-  // 上限チェック
-  const keys = Object.keys(viewedItems);
-  while (keys.length > MAX_ITEMS) {
-    const oldestKey = keys.reduce((oldest, key) =>
-      viewedItems[key] < viewedItems[oldest] ? key : oldest
-    );
-    delete viewedItems[oldestKey];
-    keys.splice(keys.indexOf(oldestKey), 1);
-  }
-
-  await chrome.storage.local.set({ [STORAGE_KEY]: viewedItems });
+  // 一括保存（上限なし）
+  await window.MichattaStorage.saveViewedItemsBulk(viewedItems);
 
   // 結果表示
   let message = `${addedCount}件を登録しました`;
@@ -118,13 +113,32 @@ async function registerItems() {
   updateCount();
 }
 
-// アラート設定を取得
-async function getAlertSettings() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get([ALERT_SETTINGS_KEY], (result) => {
-      resolve({ ...DEFAULT_ALERT_SETTINGS, ...result[ALERT_SETTINGS_KEY] });
-    });
-  });
+// 全削除処理
+async function clearAllItems() {
+  const count = await window.MichattaStorage.getViewedItemsCount();
+
+  if (count === 0) {
+    showStatus('削除する履歴がありません', true);
+    return;
+  }
+
+  // 二重確認
+  const confirmed = confirm(`本当に全ての閲覧履歴（${count}件）を削除しますか？\n\nこの操作は取り消せません。`);
+
+  if (!confirmed) {
+    showStatus('削除をキャンセルしました');
+    return;
+  }
+
+  // 削除実行
+  const success = await window.MichattaStorage.clearAllViewedItems();
+
+  if (success) {
+    showStatus(`${count}件の履歴を削除しました`);
+    updateCount();
+  } else {
+    showStatus('削除に失敗しました', true);
+  }
 }
 
 // アラート設定を保存
@@ -138,7 +152,7 @@ async function saveAlertSettings() {
     shipping8: document.getElementById('alertShipping8').checked
   };
 
-  await chrome.storage.local.set({ [ALERT_SETTINGS_KEY]: settings });
+  await window.MichattaStorage.saveAlertSettings(settings);
   // アラート設定用のステータス表示
   const alertStatus = document.getElementById('alertStatus');
   alertStatus.textContent = '設定を保存しました';
@@ -150,7 +164,7 @@ async function saveAlertSettings() {
 
 // アラート設定をUIに反映
 async function loadAlertSettings() {
-  const settings = await getAlertSettings();
+  const settings = await window.MichattaStorage.getAlertSettings();
   document.getElementById('alertRatings').value = settings.ratings;
   document.getElementById('alertBadRate').value = settings.badRate;
   document.getElementById('alertListedDays').value = settings.listedDays;
@@ -159,20 +173,11 @@ async function loadAlertSettings() {
   document.getElementById('alertShipping8').checked = settings.shipping8;
 }
 
-// 会員機能が解除されているか確認
-async function isPremiumUnlocked() {
-  return new Promise((resolve) => {
-    chrome.storage.local.get([PREMIUM_KEY], (result) => {
-      resolve(result[PREMIUM_KEY] === true);
-    });
-  });
-}
-
 // 会員パスで解除
 async function unlockPremium() {
   const pass = document.getElementById('premiumPass').value.trim();
   if (pass === PREMIUM_PASS) {
-    await chrome.storage.local.set({ [PREMIUM_KEY]: true });
+    await window.MichattaStorage.unlockPremium();
     showStatus('会員機能を解除しました！');
     updatePremiumUI(true);
   } else {
@@ -201,12 +206,24 @@ function updatePremiumUI(isUnlocked) {
 document.getElementById('registerBtn').addEventListener('click', registerItems);
 document.getElementById('saveAlertBtn').addEventListener('click', saveAlertSettings);
 document.getElementById('unlockBtn').addEventListener('click', unlockPremium);
+document.getElementById('clearAllBtn').addEventListener('click', clearAllItems);
 
 // 初期化
 async function init() {
+  // ストレージを初期化
+  try {
+    await window.MichattaStorage.initDB();
+    await window.MichattaStorage.migrateFromLegacyStorage();
+    storageReady = true;
+    console.log('[みちゃった君] ポップアップ: ストレージ初期化完了');
+  } catch (error) {
+    console.error('[みちゃった君] ポップアップ: ストレージ初期化エラー:', error);
+    storageReady = true; // フォールバック
+  }
+
   updateCount();
   loadAlertSettings();
-  const isUnlocked = await isPremiumUnlocked();
+  const isUnlocked = await window.MichattaStorage.isPremiumUnlocked();
   updatePremiumUI(isUnlocked);
 }
 init();

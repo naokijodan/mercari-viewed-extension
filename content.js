@@ -2,18 +2,23 @@
 (function() {
   'use strict';
 
-  const STORAGE_KEY = 'mercari_viewed_items';
-  const ALERT_SETTINGS_KEY = 'mercari_alert_settings';
-  const PREMIUM_KEY = 'mercari_premium_unlocked';
-  const MAX_ITEMS = 100000; // 最大保存件数
+  // ストレージ初期化待ち
+  let storageReady = false;
+  let pendingOperations = [];
+
+  // ストレージ操作をラップ（初期化完了後に実行）
+  function whenStorageReady(fn) {
+    if (storageReady) {
+      return fn();
+    }
+    return new Promise((resolve) => {
+      pendingOperations.push(() => resolve(fn()));
+    });
+  }
 
   // 会員機能が解除されているか確認
   async function isPremiumUnlocked() {
-    return new Promise((resolve) => {
-      chrome.storage.local.get([PREMIUM_KEY], (result) => {
-        resolve(result[PREMIUM_KEY] === true);
-      });
-    });
+    return whenStorageReady(() => window.MichattaStorage.isPremiumUnlocked());
   }
 
   // デフォルトのアラート設定
@@ -34,11 +39,7 @@
 
   // アラート設定を取得
   async function getAlertSettings() {
-    return new Promise((resolve) => {
-      chrome.storage.local.get([ALERT_SETTINGS_KEY], (result) => {
-        resolve({ ...DEFAULT_ALERT_SETTINGS, ...result[ALERT_SETTINGS_KEY] });
-      });
-    });
+    return whenStorageReady(() => window.MichattaStorage.getAlertSettings());
   }
 
   // アラート判定
@@ -89,14 +90,21 @@
     if (host.includes('mercari.com')) return 'mercari';
     if (host.includes('fril.jp')) return 'rakuma';
     if (host.includes('rakuten.co.jp')) return 'rakuten';
+    if (host.includes('paypayfleamarket.yahoo.co.jp')) return 'paypay';
+    if (host.includes('yahoo.co.jp')) return 'yahoo';
     return null;
   }
 
   // 商品IDをURLから抽出（各サイト対応）
   function extractItemId(url) {
+    // PayPayフリマ: paypayfleamarket.yahoo.co.jp/item/z491889774
+    // ※メルカリより先に判定（/item/パターンが重複するため）
+    const paypayMatch = url.match(/paypayfleamarket\.yahoo\.co\.jp\/item\/([a-zA-Z0-9]+)/);
+    if (paypayMatch) return 'paypay_' + paypayMatch[1];
+
     // メルカリ通常: /item/m12345678901（IDのみ）※相対パス・フルURL両対応
     const mercariMatch = url.match(/\/item\/([a-zA-Z0-9]+)/);
-    if (mercariMatch && !url.includes('rakuten.co.jp')) return mercariMatch[1];
+    if (mercariMatch && !url.includes('rakuten.co.jp') && !url.includes('yahoo.co.jp')) return mercariMatch[1];
 
     // メルカリショップ: /shops/product/xxxxx（shop_プレフィックス）
     const mercariShopMatch = url.match(/\/shops\/product\/([a-zA-Z0-9]+)/);
@@ -110,35 +118,29 @@
     const rakutenMatch = url.match(/item\.rakuten\.co\.jp\/([^?#]+)/);
     if (rakutenMatch) return 'rakuten_' + rakutenMatch[1].replace(/\/$/, '');
 
+    // ヤフオク: page.auctions.yahoo.co.jp/jp/auction/xxxxx
+    const yahooAuctionMatch = url.match(/page\.auctions\.yahoo\.co\.jp\/jp\/auction\/([a-zA-Z0-9]+)/);
+    if (yahooAuctionMatch) return 'yahoo_' + yahooAuctionMatch[1];
+
+    // ヤフオク: /auction/xxxxx（相対パス）
+    const yahooAuctionRelMatch = url.match(/\/auction\/([a-zA-Z0-9]+)/);
+    if (yahooAuctionRelMatch && url.includes('yahoo')) return 'yahoo_' + yahooAuctionRelMatch[1];
+
+    // ヤフオク検索結果のリンク: closedsearch.auctions.yahoo.co.jp や auctions.yahoo.co.jp
+    const yahooSearchMatch = url.match(/auctions\.yahoo\.co\.jp.*\/([a-zA-Z0-9]{10,})/);
+    if (yahooSearchMatch) return 'yahoo_' + yahooSearchMatch[1];
+
     return null;
   }
 
   // 閲覧済み商品を取得
   async function getViewedItems() {
-    return new Promise((resolve) => {
-      chrome.storage.local.get([STORAGE_KEY], (result) => {
-        resolve(result[STORAGE_KEY] || {});
-      });
-    });
+    return whenStorageReady(() => window.MichattaStorage.getViewedItems());
   }
 
-  // 商品を閲覧済みとして保存
+  // 商品を閲覧済みとして保存（上限なし）
   async function saveViewedItem(itemId) {
-    const viewedItems = await getViewedItems();
-
-    // 古いアイテムを削除（上限超過時）
-    const keys = Object.keys(viewedItems);
-    if (keys.length >= MAX_ITEMS) {
-      // 最も古いアイテムを削除
-      const oldestKey = keys.reduce((oldest, key) =>
-        viewedItems[key] < viewedItems[oldest] ? key : oldest
-      );
-      delete viewedItems[oldestKey];
-    }
-
-    viewedItems[itemId] = Date.now();
-
-    chrome.storage.local.set({ [STORAGE_KEY]: viewedItems });
+    return whenStorageReady(() => window.MichattaStorage.saveViewedItem(itemId));
   }
 
   // 商品ページの場合、閲覧記録を保存（チェック用タブでは保存しない）
@@ -195,6 +197,10 @@
     if (/item\.fril\.jp\/[a-zA-Z0-9]+/.test(url)) return true;
     // 楽天市場
     if (/item\.rakuten\.co\.jp\//.test(url)) return true;
+    // ヤフオク
+    if (/page\.auctions\.yahoo\.co\.jp\/jp\/auction\//.test(url)) return true;
+    // PayPayフリマ
+    if (/paypayfleamarket\.yahoo\.co\.jp\/item\//.test(url)) return true;
     return false;
   }
 
@@ -225,7 +231,9 @@
     // 商品リンクを取得（各サイト対応）
     const productLinks = document.querySelectorAll(
       'a[href*="/item/"], a[href*="/shops/product/"], ' +
-      'a[href*="item.fril.jp/"], a[href*="item.rakuten.co.jp/"]'
+      'a[href*="item.fril.jp/"], a[href*="item.rakuten.co.jp/"], ' +
+      'a[href*="page.auctions.yahoo.co.jp/jp/auction/"], a[href*="/auction/"], ' +
+      'a[href*="paypayfleamarket.yahoo.co.jp/item/"]'
     );
 
     productLinks.forEach((link) => {
@@ -234,6 +242,8 @@
       if (itemId && itemId !== currentItemId && viewedItems[itemId]) {
         // 親要素（商品カード）を探す
         const card = link.closest('[data-testid="item-cell"]') ||
+                     link.closest('.Product') ||  // ヤフオク
+                     link.closest('.cf') ||       // ヤフオク検索結果
                      link.closest('li') ||
                      link.parentElement;
 
@@ -793,7 +803,23 @@
   // async function addCheckButtons() { ... }
 
   // 初期化
-  function init() {
+  async function init() {
+    // ストレージを初期化
+    try {
+      await window.MichattaStorage.initDB();
+      await window.MichattaStorage.migrateFromLegacyStorage();
+      storageReady = true;
+
+      // 保留中の操作を実行
+      pendingOperations.forEach(fn => fn());
+      pendingOperations = [];
+
+      console.log('[みちゃった君] ストレージ初期化完了');
+    } catch (error) {
+      console.error('[みちゃった君] ストレージ初期化エラー:', error);
+      storageReady = true; // フォールバックで動作
+    }
+
     // チェック用タブでは最小限の初期化のみ
     if (isCheckTab) {
       console.log('[みちゃった君] チェック用タブとして初期化');
