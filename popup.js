@@ -39,12 +39,19 @@ function extractItemId(input) {
   if (rakutenMatch) return 'rakuten_' + rakutenMatch[1].replace(/\/$/, '');
 
   // ヤフオク: page.auctions.yahoo.co.jp/jp/auction/xxxxx
+  // ※IDがzで始まる場合はPayPayフリマの商品
   const yahooAuctionMatch = input.match(/page\.auctions\.yahoo\.co\.jp\/jp\/auction\/([a-zA-Z0-9]+)/);
-  if (yahooAuctionMatch) return 'yahoo_' + yahooAuctionMatch[1];
+  if (yahooAuctionMatch) {
+    const id = yahooAuctionMatch[1];
+    return id.startsWith('z') ? 'paypay_' + id : 'yahoo_' + id;
+  }
 
   // ヤフオク: auctions.yahoo.co.jp系
   const yahooSearchMatch = input.match(/auctions\.yahoo\.co\.jp.*\/([a-zA-Z0-9]{10,})/);
-  if (yahooSearchMatch) return 'yahoo_' + yahooSearchMatch[1];
+  if (yahooSearchMatch) {
+    const id = yahooSearchMatch[1];
+    return id.startsWith('z') ? 'paypay_' + id : 'yahoo_' + id;
+  }
 
   // IDのみの場合（mで始まるメルカリ商品ID）
   if (/^m[a-zA-Z0-9]+$/.test(input)) {

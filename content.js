@@ -119,16 +119,26 @@
     if (rakutenMatch) return 'rakuten_' + rakutenMatch[1].replace(/\/$/, '');
 
     // ヤフオク: page.auctions.yahoo.co.jp/jp/auction/xxxxx
+    // ※IDがzで始まる場合はPayPayフリマの商品（ヤフオク検索結果に混在表示される）
     const yahooAuctionMatch = url.match(/page\.auctions\.yahoo\.co\.jp\/jp\/auction\/([a-zA-Z0-9]+)/);
-    if (yahooAuctionMatch) return 'yahoo_' + yahooAuctionMatch[1];
+    if (yahooAuctionMatch) {
+      const id = yahooAuctionMatch[1];
+      return id.startsWith('z') ? 'paypay_' + id : 'yahoo_' + id;
+    }
 
     // ヤフオク: /auction/xxxxx（相対パス）
     const yahooAuctionRelMatch = url.match(/\/auction\/([a-zA-Z0-9]+)/);
-    if (yahooAuctionRelMatch && url.includes('yahoo')) return 'yahoo_' + yahooAuctionRelMatch[1];
+    if (yahooAuctionRelMatch && url.includes('yahoo')) {
+      const id = yahooAuctionRelMatch[1];
+      return id.startsWith('z') ? 'paypay_' + id : 'yahoo_' + id;
+    }
 
     // ヤフオク検索結果のリンク: closedsearch.auctions.yahoo.co.jp や auctions.yahoo.co.jp
     const yahooSearchMatch = url.match(/auctions\.yahoo\.co\.jp.*\/([a-zA-Z0-9]{10,})/);
-    if (yahooSearchMatch) return 'yahoo_' + yahooSearchMatch[1];
+    if (yahooSearchMatch) {
+      const id = yahooSearchMatch[1];
+      return id.startsWith('z') ? 'paypay_' + id : 'yahoo_' + id;
+    }
 
     return null;
   }
