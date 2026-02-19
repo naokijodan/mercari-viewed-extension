@@ -15,6 +15,11 @@ const ALERT_KEY = 'mercari_alert_settings';
 const PREMIUM_KEY = 'mercari_premium_unlocked';
 const MIGRATION_KEY = 'michatta_migration_v2';
 
+// 未処理のPromise rejectionをログに出す
+self.addEventListener('unhandledrejection', (event) => {
+  console.error('[みちゃった君 BG] 未処理のPromise rejection:', event.reason);
+});
+
 // ==============================
 // LRUキャッシュ
 // ==============================
@@ -78,10 +83,35 @@ const viewedItemsCache = new LRUCache(1000);
 // IndexedDB操作
 // ==============================
 let db = null;
+let dbReadyPromise = null;
+let dbClosed = false;
+const DB_RETRY_DELAYS = [100, 400, 900];
 
-async function initDB() {
-  if (db) return db;
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
+function setupDBEventHandlers(database) {
+  database.onversionchange = () => {
+    console.warn('[みちゃった君 BG] IndexedDB versionchange検知。接続を閉じます。');
+    database.close();
+    db = null;
+    dbClosed = true;
+  };
+
+  database.onclose = () => {
+    console.warn('[みちゃった君 BG] IndexedDB接続が閉じられました。再接続を試みます。');
+    db = null;
+    dbClosed = true;
+    if (!dbReadyPromise) {
+      initDB().catch((error) => {
+        console.error('[みちゃった君 BG] IndexedDB再接続エラー:', error);
+      });
+    }
+  };
+}
+
+function openDBOnce() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
@@ -90,8 +120,15 @@ async function initDB() {
       reject(request.error);
     };
 
+    request.onblocked = () => {
+      console.warn('[みちゃった君 BG] IndexedDBの初期化がブロックされました');
+      reject(new Error('IndexedDBがブロックされました'));
+    };
+
     request.onsuccess = () => {
       db = request.result;
+      dbClosed = false;
+      setupDBEventHandlers(db);
       console.log('[みちゃった君 BG] IndexedDB初期化完了');
       resolve(db);
     };
@@ -113,13 +150,80 @@ async function initDB() {
   });
 }
 
+async function initDB() {
+  if (db && !dbClosed) return db;
+  if (dbReadyPromise) return dbReadyPromise;
+
+  dbReadyPromise = (async () => {
+    for (let attempt = 0; attempt <= DB_RETRY_DELAYS.length; attempt++) {
+      try {
+        return await openDBOnce();
+      } catch (error) {
+        if (attempt === DB_RETRY_DELAYS.length) {
+          throw error;
+        }
+        const delay = DB_RETRY_DELAYS[attempt];
+        console.warn(`[みちゃった君 BG] IndexedDB再試行まで待機: ${delay}ms`);
+        await wait(delay);
+      }
+    }
+    throw new Error('IndexedDB初期化失敗');
+  })();
+
+  try {
+    return await dbReadyPromise;
+  } finally {
+    dbReadyPromise = null;
+  }
+}
+
+async function ensureDBReady() {
+  if (!db || dbClosed) {
+    return initDB();
+  }
+
+  try {
+    db.transaction(STORE_VIEWED, 'readonly');
+    return db;
+  } catch (error) {
+    console.warn('[みちゃった君 BG] IndexedDB接続が無効です。再接続します。', error);
+    dbClosed = true;
+    db = null;
+    return initDB();
+  }
+}
+
+function getStorageLocal(keys) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
+
+function setStorageLocal(items) {
+  return new Promise((resolve, reject) => {
+    chrome.storage.local.set(items, () => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
 // ==============================
 // 閲覧済み商品の操作
 // ==============================
 
 async function getViewedItems() {
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_VIEWED, 'readonly');
     const store = tx.objectStore(STORE_VIEWED);
 
@@ -158,7 +262,7 @@ async function getViewedItemsBatch(ids) {
   // キャッシュにないものはIndexedDBから取得
   if (missingIds.length > 0) {
     try {
-      const database = await initDB();
+      const database = await ensureDBReady();
       const tx = database.transaction(STORE_VIEWED, 'readonly');
       const store = tx.objectStore(STORE_VIEWED);
 
@@ -185,7 +289,7 @@ async function saveViewedItem(itemId) {
   const timestamp = Date.now();
 
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_VIEWED, 'readwrite');
     const store = tx.objectStore(STORE_VIEWED);
 
@@ -200,7 +304,9 @@ async function saveViewedItem(itemId) {
     viewedItemsCache.set(itemId, timestamp);
 
     // バックアップ（非同期、エラーは無視）
-    backupToStorageLocal();
+    backupSingleItem(itemId, timestamp).catch((error) => {
+      console.error('[みちゃった君 BG] バックアップエラー:', error);
+    });
 
     return true;
   } catch (error) {
@@ -211,7 +317,7 @@ async function saveViewedItem(itemId) {
 
 async function saveViewedItemsBulk(items) {
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_VIEWED, 'readwrite');
     const store = tx.objectStore(STORE_VIEWED);
 
@@ -228,7 +334,9 @@ async function saveViewedItemsBulk(items) {
     viewedItemsCache.setMultiple(items);
 
     // バックアップ
-    backupToStorageLocal();
+    backupBulkItems(items).catch((error) => {
+      console.error('[みちゃった君 BG] バックアップエラー:', error);
+    });
 
     return true;
   } catch (error) {
@@ -239,7 +347,7 @@ async function saveViewedItemsBulk(items) {
 
 async function getViewedItemsCount() {
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_VIEWED, 'readonly');
     const store = tx.objectStore(STORE_VIEWED);
 
@@ -256,7 +364,7 @@ async function getViewedItemsCount() {
 
 async function clearAllViewedItems() {
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_VIEWED, 'readwrite');
     const store = tx.objectStore(STORE_VIEWED);
 
@@ -271,7 +379,9 @@ async function clearAllViewedItems() {
     viewedItemsCache.clear();
 
     // バックアップもクリア
-    chrome.storage.local.set({ [STORAGE_KEY]: {} });
+    backupToStorageLocal().catch((error) => {
+      console.error('[みちゃった君 BG] バックアップエラー:', error);
+    });
 
     console.log('[みちゃった君 BG] 全履歴を削除しました');
     return true;
@@ -281,14 +391,25 @@ async function clearAllViewedItems() {
   }
 }
 
-// バックアップ（非同期）
+// バックアップ（単件）
+async function backupSingleItem(itemId, timestamp) {
+  const result = await getStorageLocal([STORAGE_KEY]);
+  const items = result[STORAGE_KEY] || {};
+  const updatedItems = { ...items, [itemId]: timestamp };
+  await setStorageLocal({ [STORAGE_KEY]: updatedItems });
+}
+
+// バックアップ（複数件）
+async function backupBulkItems(items) {
+  const result = await getStorageLocal([STORAGE_KEY]);
+  const currentItems = result[STORAGE_KEY] || {};
+  const mergedItems = Object.assign({}, currentItems, items);
+  await setStorageLocal({ [STORAGE_KEY]: mergedItems });
+}
+
+// バックアップ（全削除用）
 async function backupToStorageLocal() {
-  try {
-    const items = await getViewedItems();
-    chrome.storage.local.set({ [STORAGE_KEY]: items });
-  } catch (error) {
-    console.error('[みちゃった君 BG] バックアップエラー:', error);
-  }
+  await setStorageLocal({ [STORAGE_KEY]: {} });
 }
 
 // ==============================
@@ -306,7 +427,7 @@ const DEFAULT_ALERT_SETTINGS = {
 
 async function getAlertSettings() {
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_SETTINGS, 'readonly');
     const store = tx.objectStore(STORE_SETTINGS);
 
@@ -326,7 +447,7 @@ async function getAlertSettings() {
 
 async function saveAlertSettings(settings) {
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_SETTINGS, 'readwrite');
     const store = tx.objectStore(STORE_SETTINGS);
 
@@ -338,7 +459,9 @@ async function saveAlertSettings(settings) {
     });
 
     // バックアップ
-    chrome.storage.local.set({ [ALERT_KEY]: settings });
+    chrome.storage.local.set({ [ALERT_KEY]: settings }).catch((error) => {
+      console.error('[みちゃった君 BG] アラート設定バックアップエラー:', error);
+    });
 
     return true;
   } catch (error) {
@@ -349,7 +472,7 @@ async function saveAlertSettings(settings) {
 
 async function isPremiumUnlocked() {
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_SETTINGS, 'readonly');
     const store = tx.objectStore(STORE_SETTINGS);
 
@@ -368,7 +491,7 @@ async function isPremiumUnlocked() {
 
 async function unlockPremium() {
   try {
-    const database = await initDB();
+    const database = await ensureDBReady();
     const tx = database.transaction(STORE_SETTINGS, 'readwrite');
     const store = tx.objectStore(STORE_SETTINGS);
 
@@ -380,7 +503,9 @@ async function unlockPremium() {
     });
 
     // バックアップ
-    chrome.storage.local.set({ [PREMIUM_KEY]: true });
+    chrome.storage.local.set({ [PREMIUM_KEY]: true }).catch((error) => {
+      console.error('[みちゃった君 BG] 会員情報バックアップエラー:', error);
+    });
 
     return true;
   } catch (error) {
@@ -396,8 +521,12 @@ async function unlockPremium() {
 async function migrateFromStorageLocal() {
   try {
     // 移行済みチェック
-    const migrationStatus = await new Promise((resolve) => {
+    const migrationStatus = await new Promise((resolve, reject) => {
       chrome.storage.local.get([MIGRATION_KEY], (result) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
         resolve(result[MIGRATION_KEY]);
       });
     });
@@ -410,8 +539,12 @@ async function migrateFromStorageLocal() {
     console.log('[みちゃった君 BG] データ移行開始...');
 
     // 旧データを取得
-    const legacyData = await new Promise((resolve) => {
+    const legacyData = await new Promise((resolve, reject) => {
       chrome.storage.local.get([STORAGE_KEY, ALERT_KEY, PREMIUM_KEY], (result) => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+          return;
+        }
         resolve(result);
       });
     });
@@ -450,7 +583,9 @@ async function migrateFromStorageLocal() {
     }
 
     // 移行完了フラグ
-    chrome.storage.local.set({ [MIGRATION_KEY]: 'completed' });
+    chrome.storage.local.set({ [MIGRATION_KEY]: 'completed' }).catch((error) => {
+      console.error('[みちゃった君 BG] 移行フラグ保存エラー:', error);
+    });
     console.log('[みちゃった君 BG] 全移行完了');
 
   } catch (error) {
@@ -465,7 +600,17 @@ async function migrateFromStorageLocal() {
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   // ストレージ操作
   if (request.action === 'storage') {
-    handleStorageMessage(request, sendResponse);
+    let responded = false;
+    const safeSendResponse = (data) => {
+      if (!responded) {
+        responded = true;
+        sendResponse(data);
+      }
+    };
+    handleStorageMessage(request, safeSendResponse).catch((error) => {
+      console.error('[みちゃった君 BG] ストレージ操作エラー:', error);
+      safeSendResponse({ success: false, error: error.message });
+    });
     return true; // 非同期レスポンス
   }
 
@@ -479,8 +624,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // バックグラウンドで新しいタブを開く
   if (request.action === 'openInBackground') {
-    chrome.tabs.create({ url: request.url, active: false });
+    chrome.tabs.create({ url: request.url, active: false }, () => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      sendResponse({ success: true });
+    });
+    return true;
   }
+
+  sendResponse({ success: false, error: 'Unknown action' });
+  return false;
 });
 
 async function handleStorageMessage(request, sendResponse) {
@@ -561,6 +716,14 @@ async function fetchItemDetailsInBackground(itemId, itemUrl) {
       url: checkUrl,
       active: false
     }, (tab) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      if (!tab || typeof tab.id !== 'number') {
+        reject(new Error('タブ作成失敗'));
+        return;
+      }
       const tabId = tab.id;
       let timeoutId;
       let retryCount = 0;
@@ -620,7 +783,12 @@ async function fetchItemDetailsInBackground(itemId, itemUrl) {
         }
       };
 
-      chrome.tabs.onUpdated.addListener(listener);
+      if (typeof tabId === 'number') {
+        chrome.tabs.onUpdated.addListener(listener);
+      } else {
+        clearTimeout(timeoutId);
+        reject(new Error('タブIDが無効です'));
+      }
     });
   });
 }
@@ -640,4 +808,6 @@ async function initialize() {
 }
 
 // Service Worker起動時に初期化
-initialize();
+initialize().catch((error) => {
+  console.error('[みちゃった君 BG] 初期化エラー:', error);
+});
