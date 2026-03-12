@@ -259,19 +259,23 @@ async function getViewedItemsBatch(ids) {
     }
   }
 
-  // キャッシュにないものはIndexedDBから取得
+  // キャッシュにないものはIndexedDBから並列取得
   if (missingIds.length > 0) {
     try {
       const database = await ensureDBReady();
       const tx = database.transaction(STORE_VIEWED, 'readonly');
       const store = tx.objectStore(STORE_VIEWED);
 
-      for (const id of missingIds) {
-        const item = await new Promise((resolve) => {
+      const promises = missingIds.map((id) => {
+        return new Promise((resolve) => {
           const request = store.get(id);
-          request.onsuccess = () => resolve(request.result);
-          request.onerror = () => resolve(null);
+          request.onsuccess = () => resolve({ id, item: request.result });
+          request.onerror = () => resolve({ id, item: null });
         });
+      });
+
+      const results = await Promise.all(promises);
+      for (const { id, item } of results) {
         if (item) {
           result[id] = item.timestamp;
           viewedItemsCache.set(id, item.timestamp);
@@ -303,10 +307,8 @@ async function saveViewedItem(itemId) {
     // キャッシュに追加
     viewedItemsCache.set(itemId, timestamp);
 
-    // バックアップ（非同期、エラーは無視）
-    backupSingleItem(itemId, timestamp).catch((error) => {
-      console.error('[みちゃった君 BG] バックアップエラー:', error);
-    });
+    // バックアップキューに追加
+    queueBackup(itemId, timestamp);
 
     return true;
   } catch (error) {
@@ -333,10 +335,8 @@ async function saveViewedItemsBulk(items) {
     // キャッシュに追加
     viewedItemsCache.setMultiple(items);
 
-    // バックアップ
-    backupBulkItems(items).catch((error) => {
-      console.error('[みちゃった君 BG] バックアップエラー:', error);
-    });
+    // バックアップキューに追加
+    queueBackupBulk(items);
 
     return true;
   } catch (error) {
@@ -391,24 +391,70 @@ async function clearAllViewedItems() {
   }
 }
 
-// バックアップ（単件）
-async function backupSingleItem(itemId, timestamp) {
-  const result = await getStorageLocal([STORAGE_KEY]);
-  const items = result[STORAGE_KEY] || {};
-  const updatedItems = { ...items, [itemId]: timestamp };
-  await setStorageLocal({ [STORAGE_KEY]: updatedItems });
+// バックアップ（デバウンス付き即時方式）
+// Service Worker suspendに備え、長時間のタイマーは使わない
+let backupPending = {};
+let backupDebounceTimer = null;
+const BACKUP_DEBOUNCE_MS = 10 * 1000; // 10秒
+
+// バックアップキューに追加（10秒後にフラッシュ）
+function queueBackup(itemId, timestamp) {
+  backupPending[itemId] = timestamp;
+  scheduleBackupFlush();
 }
 
-// バックアップ（複数件）
-async function backupBulkItems(items) {
-  const result = await getStorageLocal([STORAGE_KEY]);
-  const currentItems = result[STORAGE_KEY] || {};
-  const mergedItems = Object.assign({}, currentItems, items);
-  await setStorageLocal({ [STORAGE_KEY]: mergedItems });
+// バックアップキューに複数追加
+function queueBackupBulk(items) {
+  Object.assign(backupPending, items);
+  scheduleBackupFlush();
+}
+
+// デバウンス付きバックアップスケジュール
+function scheduleBackupFlush() {
+  if (backupDebounceTimer !== null) {
+    clearTimeout(backupDebounceTimer);
+  }
+  backupDebounceTimer = setTimeout(() => {
+    backupDebounceTimer = null;
+    flushBackup().catch((error) => {
+      console.error('[みちゃった君 BG] バックアップフラッシュエラー:', error);
+    });
+  }, BACKUP_DEBOUNCE_MS);
+}
+
+// バックアップを実行
+async function flushBackup() {
+  const itemsToBackup = { ...backupPending };
+  backupPending = {};
+
+  if (Object.keys(itemsToBackup).length === 0) return;
+
+  try {
+    const result = await getStorageLocal([STORAGE_KEY]);
+    const currentItems = result[STORAGE_KEY] || {};
+    const mergedItems = Object.assign({}, currentItems, itemsToBackup);
+    await setStorageLocal({ [STORAGE_KEY]: mergedItems });
+  } catch (error) {
+    // 失敗分を戻す（フラッシュ中に追加された新しいエントリは保護する）
+    for (const [key, value] of Object.entries(itemsToBackup)) {
+      if (!(key in backupPending)) {
+        backupPending[key] = value;
+      }
+    }
+    scheduleBackupFlush();
+    console.error('[みちゃった君 BG] バックアップエラー:', error);
+  }
 }
 
 // バックアップ（全削除用）
 async function backupToStorageLocal() {
+  // 保留中のタイマーをキャンセル
+  if (backupDebounceTimer !== null) {
+    clearTimeout(backupDebounceTimer);
+    backupDebounceTimer = null;
+  }
+  // キューをクリア
+  backupPending = {};
   await setStorageLocal({ [STORAGE_KEY]: {} });
 }
 

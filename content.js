@@ -227,77 +227,103 @@
     return false;
   }
 
-  // 検索一覧の商品にマークを付ける（除外ページでは実行しない）
+  let markInProgress = false;
   async function markViewedItemsInList() {
+    if (markInProgress) return;
+    markInProgress = true;
+    try {
+      // チェック用タブや除外ページでは実行しない
+      if (isCheckTab || isExcludedPage()) {
+        return;
+      }
 
-    // チェック用タブや除外ページでは実行しない
-    if (isCheckTab || isExcludedPage()) {
-      return;
-    }
+      // 現在のページの商品IDを取得（商品ページの場合、自分自身にはバッジを付けない）
+      const currentItemId = extractItemId(window.location.href);
 
-    const viewedItems = await getViewedItems();
+      // 商品リンクを取得（各サイト対応）
+      const productLinks = document.querySelectorAll(
+        'a[href*="/item/"], a[href*="/shops/product/"], ' +
+        'a[href*="item.fril.jp/"], a[href*="item.rakuten.co.jp/"], ' +
+        'a[href*="page.auctions.yahoo.co.jp/jp/auction/"], a[href*="/auction/"], ' +
+        'a[href*="paypayfleamarket.yahoo.co.jp/item/"]'
+      );
 
-    // 現在のページの商品IDを取得（商品ページの場合、自分自身にはバッジを付けない）
-    const currentItemId = extractItemId(window.location.href);
-
-    // 商品リンクを取得（各サイト対応）
-    const productLinks = document.querySelectorAll(
-      'a[href*="/item/"], a[href*="/shops/product/"], ' +
-      'a[href*="item.fril.jp/"], a[href*="item.rakuten.co.jp/"], ' +
-      'a[href*="page.auctions.yahoo.co.jp/jp/auction/"], a[href*="/auction/"], ' +
-      'a[href*="paypayfleamarket.yahoo.co.jp/item/"]'
-    );
-
-    productLinks.forEach((link) => {
-      const itemId = extractItemId(link.href);
-      // 現在のページの商品は除外
-      if (itemId && itemId !== currentItemId && viewedItems[itemId]) {
-        // PayPayフリマ検索ページ判定
-        const isPayPaySearch = window.location.hostname.includes('paypayfleamarket.yahoo.co.jp') &&
-                               window.location.pathname.includes('/search/');
-
-        // 親要素（商品カード）を探す
-        let card;
-        if (isPayPaySearch) {
-          // PayPayフリマの検索結果はリンク自体が商品カード
-          card = link;
-        } else {
-          card = link.closest('[data-testid="item-cell"]') ||  // メルカリ
-                 link.closest('[data-testid="product-box"]') ||  // メルカリShops
-                 link.closest('li.Product') ||  // ヤフオク（検索結果）
-                 link.closest('.Product') ||    // ヤフオク
-                 link.closest('.cf') ||         // ヤフオク検索結果（旧）
-                 link.closest('li[class*="item"]') ||  // 汎用
-                 link.parentElement;
+      // ページ内の商品IDリストを作成（重複排除）
+      const itemIds = [];
+      const linkMap = new Map();
+      productLinks.forEach((link) => {
+        const itemId = extractItemId(link.href);
+        if (itemId && itemId !== currentItemId) {
+          if (!linkMap.has(itemId)) {
+            linkMap.set(itemId, []);
+            itemIds.push(itemId);
+          }
+          linkMap.get(itemId).push(link);
         }
+      });
 
-        if (card && !card.classList.contains('mercari-viewed-marked')) {
-          card.classList.add('mercari-viewed-marked');
+      if (itemIds.length === 0) return;
 
-          // バッジを追加
-          const badge = document.createElement('div');
-          badge.className = 'mercari-viewed-badge';
-          badge.textContent = '閲覧済み';
+      // バッチ取得（ページ内のIDだけを問い合わせ）
+      let viewedItems;
+      try {
+        viewedItems = await whenStorageReady(() => window.MichattaStorage.getViewedItemsBatch(itemIds));
+      } catch (error) {
+        console.error('[みちゃった君] バッチ取得エラー:', error);
+        return;
+      }
 
-          // 閲覧日時を表示
-          const viewedDate = new Date(viewedItems[itemId]);
-          badge.title = `閲覧日時: ${viewedDate.toLocaleString('ja-JP')}`;
+      // PayPayフリマ検索ページ判定
+      const isPayPaySearch = window.location.hostname.includes('paypayfleamarket.yahoo.co.jp') &&
+                             window.location.pathname.includes('/search/');
 
-          // カードの相対位置設定
-          if (getComputedStyle(card).position === 'static') {
-            card.style.position = 'relative';
+      // 閲覧済みの商品にバッジを追加
+      for (const [itemId, links] of linkMap) {
+        if (!viewedItems[itemId]) continue;
+
+        for (const link of links) {
+          let card;
+          if (isPayPaySearch) {
+            card = link;
+          } else {
+            card = link.closest('[data-testid="item-cell"]') ||
+                   link.closest('[data-testid="product-box"]') ||
+                   link.closest('li.Product') ||
+                   link.closest('.Product') ||
+                   link.closest('.cf') ||
+                   link.closest('li[class*="item"]') ||
+                   link.parentElement;
           }
 
-          card.appendChild(badge);
+          if (card && !card.classList.contains('mercari-viewed-marked')) {
+            card.classList.add('mercari-viewed-marked');
+
+            const badge = document.createElement('div');
+            badge.className = 'mercari-viewed-badge';
+            badge.textContent = '閲覧済み';
+
+            const viewedDate = new Date(viewedItems[itemId]);
+            badge.title = `閲覧日時: ${viewedDate.toLocaleString('ja-JP')}`;
+
+            if (getComputedStyle(card).position === 'static') {
+              card.style.position = 'relative';
+            }
+
+            card.appendChild(badge);
+          }
         }
       }
-    });
+    } finally {
+      markInProgress = false;
+    }
   }
 
   // MutationObserverで動的に追加される商品も監視
   function observeDOM() {
     // チェック用タブでは監視しない
     if (isCheckTab) return;
+
+    let debounceTimer = null;
 
     const observer = new MutationObserver((mutations) => {
       let shouldCheck = false;
@@ -307,8 +333,11 @@
         }
       });
       if (shouldCheck) {
-        markViewedItemsInList();
-        addOpenButtons(); // 開くボタンも追加
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          markViewedItemsInList();
+          addOpenButtons();
+        }, 250);
       }
     });
 
