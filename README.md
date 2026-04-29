@@ -8,6 +8,9 @@
 - 楽天市場
 - ヤフオク
 - PayPayフリマ
+- オフモール（ハードオフ）
+- Yahoo!ショッピング（ヤフショ）
+- Amazon
 
 ## 機能
 
@@ -18,6 +21,12 @@
 - **手動登録**: ポップアップから商品IDやURLを直接登録可能
 - **無制限保存**: 登録件数の上限なし
 - **全削除機能**: ワンクリックで全履歴を削除可能
+
+## v3.2.0の主な変更点
+
+1. **対応サイト追加** - オフモール（ハードオフ）、Yahoo!ショッピング（ヤフショ）、Amazon に対応
+2. **「開く」ボタンを各サイトに展開** - 検索結果の商品カードから、バックグラウンドで新しいタブを開くボタン（メルカリだけだったのを ラクマ・楽天市場・ヤフオク・PayPayフリマ・オフモール・ヤフショ・Amazon にも展開）
+3. **ヤフショとヤフオクの判定整理** - 同じ yahoo.co.jp ドメイン傘下での衝突を解消
 
 ## v3.1.5の主な変更点
 
@@ -55,8 +64,13 @@
 ### 対応形式
 - メルカリ: `https://jp.mercari.com/item/m12345678901`
 - メルカリショップ: `https://jp.mercari.com/shops/product/xxxxx`
+- ラクマ: `https://item.fril.jp/xxxxx`
+- 楽天市場: `https://item.rakuten.co.jp/shop/product/`
 - ヤフオク: `https://page.auctions.yahoo.co.jp/jp/auction/xxxxx`
 - PayPayフリマ: `https://paypayfleamarket.yahoo.co.jp/item/xxxxx`
+- オフモール: `https://netmall.hardoff.co.jp/product/1234567/`
+- ヤフショ: `https://store.shopping.yahoo.co.jp/shop/product.html`
+- Amazon: `https://www.amazon.co.jp/dp/B08N5WRWNW`
 
 ## プライバシー
 

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "みちゃった君",
-  "version": "3.1.8",
+  "version": "3.2.0",
   "description": "以前閲覧した商品を検索一覧でマークします",
   "permissions": ["storage", "unlimitedStorage"],
   "background": {
@@ -29,7 +29,12 @@
         "https://auctions.yahoo.co.jp/*",
         "https://*.auctions.yahoo.co.jp/*",
         "https://page.auctions.yahoo.co.jp/*",
-        "https://paypayfleamarket.yahoo.co.jp/*"
+        "https://paypayfleamarket.yahoo.co.jp/*",
+        "https://netmall.hardoff.co.jp/*",
+        "https://shopping.yahoo.co.jp/*",
+        "https://*.shopping.yahoo.co.jp/*",
+        "https://www.amazon.co.jp/*",
+        "https://amazon.co.jp/*"
       ],
       "js": ["storage.js", "content.js"],
       "css": ["styles.css"]

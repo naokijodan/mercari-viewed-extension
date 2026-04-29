@@ -37,6 +37,17 @@
   // 表示中の詳細パネル（複数対応）
   let detailPanels = new Map(); // itemId -> panel
 
+  // マーク済み itemId を記憶（MutationObserver による重複マーク防止）
+  // URL変更時にクリアされる（SPA対応）
+  const markedItemIds = new Set();
+  let lastUrl = window.location.href;
+  setInterval(() => {
+    if (window.location.href !== lastUrl) {
+      lastUrl = window.location.href;
+      markedItemIds.clear();
+    }
+  }, 1000);
+
   // アラート設定を取得
   async function getAlertSettings() {
     return whenStorageReady(() => window.MichattaStorage.getAlertSettings());
@@ -92,7 +103,10 @@
     if (host.includes('fril.jp')) return 'rakuma';
     if (host.includes('rakuten.co.jp')) return 'rakuten';
     if (host.includes('paypayfleamarket.yahoo.co.jp')) return 'paypay';
+    if (host.includes('shopping.yahoo.co.jp')) return 'yshopping';
     if (host.includes('yahoo.co.jp')) return 'yahoo';
+    if (host.includes('netmall.hardoff.co.jp')) return 'hardoff';
+    if (host.includes('amazon.co.jp')) return 'amazon';
     return null;
   }
 
@@ -119,6 +133,14 @@
     const rakutenMatch = url.match(/item\.rakuten\.co\.jp\/([^?#]+)/);
     if (rakutenMatch) return 'rakuten_' + rakutenMatch[1].replace(/\/$/, '');
 
+    // ヤフショ（Yahoo!ショッピング）: store.shopping.yahoo.co.jp/{store_id}/{product_id}.html
+    // ※パンくず（カテゴリページ）と区別するため .html 必須
+    // ※ヤフオク判定より先に評価する（host が yahoo.co.jp で被るため）
+    const yshoppingMatch = url.match(/store\.shopping\.yahoo\.co\.jp\/([^/]+)\/([^/?#]+)\.html(?:[?#]|$)/);
+    if (yshoppingMatch) {
+      return 'yshopping_' + yshoppingMatch[1] + '_' + yshoppingMatch[2];
+    }
+
     // ヤフオク: page.auctions.yahoo.co.jp/jp/auction/xxxxx
     // ※IDがzで始まる場合はPayPayフリマの商品（ヤフオク検索結果に混在表示される）
     const yahooAuctionMatch = url.match(/page\.auctions\.yahoo\.co\.jp\/jp\/auction\/([a-zA-Z0-9]+)/);
@@ -140,6 +162,19 @@
       const id = yahooSearchMatch[1];
       return id.startsWith('z') ? 'paypay_' + id : 'yahoo_' + id;
     }
+
+    // オフモール（ハードオフ）: netmall.hardoff.co.jp/product/[数字]/
+    const hardoffMatch = url.match(/netmall\.hardoff\.co\.jp\/product\/([0-9]+)/);
+    if (hardoffMatch) return 'hardoff_' + hardoffMatch[1];
+
+    // Amazon: /dp/[ASIN] または /gp/product/[ASIN]
+    // ASIN は英数字10桁（例: B08N5WRWNW）
+    const amazonMatch = url.match(/amazon\.co\.jp\/(?:.*\/)?(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i);
+    if (amazonMatch) return 'amazon_' + amazonMatch[1].toUpperCase();
+
+    // Amazon スポンサーリンク: /sspa/click?...&url=...%2Fdp%2F[ASIN]... (URLエンコード形式)
+    const amazonSpaMatch = url.match(/%2[Ff](?:dp|gp%2[Ff]product)%2[Ff]([A-Z0-9]{10})/i);
+    if (amazonSpaMatch) return 'amazon_' + amazonSpaMatch[1].toUpperCase();
 
     return null;
   }
@@ -212,6 +247,12 @@
     if (/page\.auctions\.yahoo\.co\.jp\/jp\/auction\//.test(url)) return true;
     // PayPayフリマ
     if (/paypayfleamarket\.yahoo\.co\.jp\/item\//.test(url)) return true;
+    // オフモール
+    if (/netmall\.hardoff\.co\.jp\/product\/[0-9]+/.test(url)) return true;
+    // ヤフショ（store.shopping.yahoo.co.jp/{store_id}/{product_id}.html）
+    if (/store\.shopping\.yahoo\.co\.jp\/[^/]+\/[^/?#]+\.html/.test(url)) return true;
+    // Amazon商品ページ（/dp/ASIN または /gp/product/ASIN）
+    if (/amazon\.co\.jp\/(?:.*\/)?(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(url)) return true;
     return false;
   }
 
@@ -237,6 +278,12 @@
         return;
       }
 
+      // ヤフショ商品ページ（store.shopping.yahoo.co.jp）ではマークを表示しない
+      // パンくず・カテゴリリンクへの誤マークを防ぐため
+      if (getCurrentSite() === 'yshopping' && window.location.hostname.startsWith('store.')) {
+        return;
+      }
+
       // 現在のページの商品IDを取得（商品ページの場合、自分自身にはバッジを付けない）
       const currentItemId = extractItemId(window.location.href);
 
@@ -245,7 +292,10 @@
         'a[href*="/item/"], a[href*="/shops/product/"], ' +
         'a[href*="item.fril.jp/"], a[href*="item.rakuten.co.jp/"], ' +
         'a[href*="page.auctions.yahoo.co.jp/jp/auction/"], a[href*="/auction/"], ' +
-        'a[href*="paypayfleamarket.yahoo.co.jp/item/"]'
+        'a[href*="paypayfleamarket.yahoo.co.jp/item/"], ' +
+        'a[href*="netmall.hardoff.co.jp/product/"], ' +
+        'a[href*="store.shopping.yahoo.co.jp/"], ' +
+        'a[href*="/dp/"], a[href*="/gp/product/"], a[href*="/sspa/click"]'
       );
 
       // ページ内の商品IDリストを作成（重複排除）
@@ -276,14 +326,31 @@
       // PayPayフリマ検索ページ判定
       const isPayPaySearch = window.location.hostname.includes('paypayfleamarket.yahoo.co.jp') &&
                              window.location.pathname.includes('/search/');
+      // 1カードに複数リンク（画像 + タイトル等）が存在し重複マークが起きるサイト
+      // → リンク自体をカードとして扱い、最初の1リンクだけマーク
+      const isYShopping = getCurrentSite() === 'yshopping';
+      const isRakuma = getCurrentSite() === 'rakuma';
+      const isRakuten = getCurrentSite() === 'rakuten';
+      const isAmazon = getCurrentSite() === 'amazon';
+      const useLinkAsCard = isPayPaySearch || isYShopping || isRakuma || isRakuten || isAmazon;
+      const needsLinkDedup = isYShopping || isRakuma || isRakuten || isAmazon;
 
       // 閲覧済みの商品にバッジを追加
       for (const [itemId, links] of linkMap) {
         if (!viewedItems[itemId]) continue;
 
-        for (const link of links) {
+        // 1カードに画像リンク+タイトルリンクの2つあるサイトは最初の1つだけマーク
+        const linksToProcess = needsLinkDedup ? [links[0]] : links;
+
+        // ヤフショ・ラクマ等: モジュールレベルで既にマーク済みのitemIdはスキップ
+        // （MutationObserver による複数回呼び出しで別要素に重複マークされるのを防ぐ）
+        if (needsLinkDedup && markedItemIds.has(itemId)) {
+          continue;
+        }
+
+        for (const link of linksToProcess) {
           let card;
-          if (isPayPaySearch) {
+          if (useLinkAsCard) {
             card = link;
           } else {
             card = link.closest('[data-testid="item-cell"]') ||
@@ -292,11 +359,15 @@
                    link.closest('.Product') ||
                    link.closest('.cf') ||
                    link.closest('li[class*="item"]') ||
+                   link.closest('li[class*="product"]') ||
+                   link.closest('article') ||
+                   link.closest('li') ||
                    link.parentElement;
           }
 
           if (card && !card.classList.contains('mercari-viewed-marked')) {
             card.classList.add('mercari-viewed-marked');
+            card.setAttribute('data-mercari-viewed-id', itemId);
 
             const badge = document.createElement('div');
             badge.className = 'mercari-viewed-badge';
@@ -310,6 +381,23 @@
             }
 
             card.appendChild(badge);
+
+            // モジュールレベルで記憶（次回以降スキップ）
+            if (needsLinkDedup) {
+              markedItemIds.add(itemId);
+            }
+          }
+        }
+
+        // dedup対象サイト: 同じitemIdの重複マークを掃除（最初の1つを残して他を削除）
+        if (needsLinkDedup) {
+          const sameIdMarked = document.querySelectorAll(`[data-mercari-viewed-id="${itemId}"]`);
+          if (sameIdMarked.length > 1) {
+            Array.from(sameIdMarked).slice(1).forEach((el) => {
+              el.querySelectorAll('.mercari-viewed-badge').forEach((b) => b.remove());
+              el.classList.remove('mercari-viewed-marked');
+              el.removeAttribute('data-mercari-viewed-id');
+            });
           }
         }
       }
@@ -808,33 +896,133 @@
     });
   }
 
-  // 商品カードに開くボタンを追加（全商品対象）
+  // 商品カードに開くボタンを追加
   async function addOpenButtons() {
     // チェック用タブでは追加しない
     if (isCheckTab) return;
 
-    // メルカリでのみ実行
-    if (getCurrentSite() !== 'mercari') return;
+    const site = getCurrentSite();
+    // 開くボタン対応サイト（段階的に拡張）
+    if (site !== 'mercari' && site !== 'hardoff' && site !== 'yshopping' && site !== 'paypay' && site !== 'yahoo' && site !== 'rakuma' && site !== 'rakuten' && site !== 'amazon') return;
     if (isExcludedPage()) return;
 
     // 現在のページの商品ID（商品ページの場合、自分自身にはボタンを付けない）
     const currentItemId = extractItemId(window.location.href);
 
-    // 商品リンクを取得
-    const productLinks = document.querySelectorAll(
-      'a[href*="/item/"], a[href*="/shops/product/"]'
-    );
+    // サイト別に商品リンクを取得
+    let productLinks;
+    if (site === 'mercari') {
+      productLinks = document.querySelectorAll(
+        'a[href*="/item/"], a[href*="/shops/product/"]'
+      );
+    } else if (site === 'hardoff') {
+      productLinks = document.querySelectorAll(
+        'a[href*="netmall.hardoff.co.jp/product/"], a[href^="/product/"]'
+      );
+    } else if (site === 'yshopping') {
+      // 商品ページ（store.shopping.yahoo.co.jp）ではボタンを表示しない
+      // 商品ページにはパンくず・カテゴリ・関連店舗リンクが多数あり誤誘導の原因になるため
+      if (window.location.hostname.startsWith('store.')) return;
+      productLinks = document.querySelectorAll(
+        'a[href*="store.shopping.yahoo.co.jp/"]'
+      );
+    } else if (site === 'paypay') {
+      // PayPayフリマは検索ページのみ表示（商品ページは関連商品で誤誘導の可能性があるため）
+      if (!window.location.pathname.includes('/search/')) return;
+      // 相対パス（/item/xxx）と絶対URLの両方に対応
+      productLinks = document.querySelectorAll(
+        'a[href^="/item/"], a[href*="paypayfleamarket.yahoo.co.jp/item/"]'
+      );
+    } else if (site === 'yahoo') {
+      // ヤフオク商品ページ（page.auctions.yahoo.co.jp）ではボタンを表示しない
+      // 入札・関連オークションリンクへの誤誘導を防ぐ
+      if (window.location.hostname.includes('page.auctions.yahoo.co.jp')) return;
+      // 検索結果・カテゴリページの商品リンク（既存マーク表示と同じセレクタ）
+      productLinks = document.querySelectorAll(
+        'a[href*="page.auctions.yahoo.co.jp/jp/auction/"], a[href*="/auction/"]'
+      );
+    } else if (site === 'rakuma') {
+      // ラクマ商品ページ（item.fril.jp/xxxxx）ではボタンを表示しない
+      // 関連商品リンクへの誤誘導を防ぐ
+      if (window.location.hostname.includes('item.fril.jp')) return;
+      // 検索結果・カテゴリページの商品リンク（既存マーク表示と同じセレクタ）
+      productLinks = document.querySelectorAll(
+        'a[href*="item.fril.jp/"]'
+      );
+    } else if (site === 'rakuten') {
+      // 楽天市場の商品ページ（item.rakuten.co.jp）ではボタンを表示しない
+      // 関連商品・店舗リンクへの誤誘導を防ぐ
+      if (window.location.hostname.includes('item.rakuten.co.jp')) return;
+      // 検索結果ページの商品リンク（既存マーク表示と同じセレクタ）
+      productLinks = document.querySelectorAll(
+        'a[href*="item.rakuten.co.jp/"]'
+      );
+    } else if (site === 'amazon') {
+      // Amazon商品ページ（/dp/ASIN または /gp/product/ASIN）ではボタンを表示しない
+      // 関連商品・カルーセルへの誤誘導を防ぐ
+      if (/\/(?:dp|gp\/product)\/[A-Z0-9]{10}/i.test(window.location.pathname)) return;
+      // 検索結果ページの商品リンク（直接URL + スポンサーリンク両対応）
+      productLinks = document.querySelectorAll(
+        'a[href*="/dp/"], a[href*="/gp/product/"], a[href*="/sspa/click"]'
+      );
+    }
+
+    // ヤフショ向け重複防止（1カードに複数リンクがあるため同じitemIdを複数処理しない）
+    const processedItemIds = new Set();
 
     productLinks.forEach((link) => {
       const itemId = extractItemId(link.href);
       // 現在のページの商品は除外
       if (!itemId || itemId === currentItemId) return;
 
-      // 親要素（商品カード）を探す
-      const card = link.closest('[data-testid="item-cell"]') ||
-                   link.closest('[data-testid="product-box"]') ||  // メルカリShops
-                   link.closest('li') ||
-                   link.parentElement;
+      // 1カードに複数リンク（画像 + タイトル等）があるサイトは同一itemIdにつき最初の1リンクだけ処理
+      if (site === 'yshopping' || site === 'rakuma' || site === 'rakuten' || site === 'amazon') {
+        if (processedItemIds.has(itemId)) return;
+        processedItemIds.add(itemId);
+      }
+
+      // サイト別に親要素（商品カード）を探す
+      let card;
+      if (site === 'mercari') {
+        card = link.closest('[data-testid="item-cell"]') ||
+               link.closest('[data-testid="product-box"]') ||  // メルカリShops
+               link.closest('li') ||
+               link.parentElement;
+      } else if (site === 'hardoff') {
+        card = link.closest('li[class*="product"]') ||
+               link.closest('li[class*="item"]') ||
+               link.closest('article') ||
+               link.closest('li') ||
+               link.parentElement;
+      } else if (site === 'yshopping') {
+        // ヤフショはカードのDOM構造が複雑なためリンク自体をカードとして扱う
+        card = link;
+      } else if (site === 'paypay') {
+        // PayPayフリマ検索ページは既存マーク機能と同じパターン（リンク自体をカードに）
+        card = link;
+      } else if (site === 'yahoo') {
+        // ヤフオク（既存マーク機能と同じ closest パターン）
+        card = link.closest('li.Product') ||
+               link.closest('.Product') ||
+               link.closest('li[class*="Product"]') ||
+               link.closest('li[class*="product"]') ||
+               link.closest('li[class*="item"]') ||
+               link.closest('article') ||
+               link.closest('li') ||
+               link.parentElement;
+      } else if (site === 'rakuma') {
+        // ラクマは1カードに画像リンク+タイトルリンクの2つあるため
+        // ヤフショ・PayPayと同じリンク自体をカードとして扱うパターン
+        card = link;
+      } else if (site === 'rakuten') {
+        // 楽天市場は1カードに画像リンク+タイトルリンクの2つあるため
+        // ラクマ・ヤフショ・PayPayと同じリンク自体をカードとして扱うパターン
+        card = link;
+      } else if (site === 'amazon') {
+        // Amazonは1カードに画像リンク+タイトルリンクの2つあるため
+        // ラクマ・ヤフショ・PayPayと同じリンク自体をカードとして扱うパターン
+        card = link;
+      }
 
       if (card && !card.querySelector('.mercari-open-btn')) {
         // カードの相対位置設定
@@ -846,6 +1034,13 @@
         const openBtn = document.createElement('button');
         openBtn.className = 'mercari-open-btn';
         openBtn.textContent = '開く';
+        // 親<a>要素のクリック・mousedownナビゲーションを阻止
+        ['mousedown', 'pointerdown', 'touchstart'].forEach((evt) => {
+          openBtn.addEventListener(evt, (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          });
+        });
         openBtn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -855,6 +1050,22 @@
         card.appendChild(openBtn);
       }
     });
+
+    // 重複防止が必要なサイト: 同じitemIdに複数の開くボタンがあれば最初の1つだけ残す
+    if (site === 'yshopping' || site === 'rakuma' || site === 'rakuten' || site === 'amazon') {
+      const seenItemIds = new Set();
+      document.querySelectorAll('.mercari-open-btn').forEach((btn) => {
+        const parentLink = btn.parentElement;
+        if (!parentLink || parentLink.tagName !== 'A') return;
+        const id = extractItemId(parentLink.href);
+        if (!id) return;
+        if (seenItemIds.has(id)) {
+          btn.remove();
+        } else {
+          seenItemIds.add(id);
+        }
+      });
+    }
   }
 
   // チェックボタン機能（非表示・将来復活用にコード保持）

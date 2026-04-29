@@ -53,6 +53,18 @@ function extractItemId(input) {
     return id.startsWith('z') ? 'paypay_' + id : 'yahoo_' + id;
   }
 
+  // オフモール（ハードオフ）: netmall.hardoff.co.jp/product/[数字]/
+  const hardoffMatch = input.match(/netmall\.hardoff\.co\.jp\/product\/([0-9]+)/);
+  if (hardoffMatch) return 'hardoff_' + hardoffMatch[1];
+
+  // ヤフショ: store.shopping.yahoo.co.jp/{store_id}/{product_id}.html
+  const yshoppingMatch = input.match(/store\.shopping\.yahoo\.co\.jp\/([^/]+)\/([^/?#]+)\.html(?:[?#]|$)/);
+  if (yshoppingMatch) return 'yshopping_' + yshoppingMatch[1] + '_' + yshoppingMatch[2];
+
+  // Amazon: /dp/[ASIN] または /gp/product/[ASIN]
+  const amazonMatch = input.match(/amazon\.co\.jp\/(?:.*\/)?(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i);
+  if (amazonMatch) return 'amazon_' + amazonMatch[1].toUpperCase();
+
   // IDのみの場合（mで始まるメルカリ商品ID）
   if (/^m[a-zA-Z0-9]+$/.test(input)) {
     return input;

@@ -13,3 +13,9 @@ package-lock.json
 
 # Build
 *.zip
+みちゃった君_v*/
+
+# Codex 開発ファイル（リポジトリには含めない）
+CODEX_INSTRUCTIONS.md
+CODEX_PROMPT.md
+codex/
