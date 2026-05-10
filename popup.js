@@ -160,6 +160,91 @@ async function clearAllItems() {
   }
 }
 
+// IDのプレフィックスからサイト名を判定
+function detectSite(itemId) {
+  if (itemId.startsWith('paypay_')) return 'paypay';
+  if (itemId.startsWith('shop_')) return 'mercari_shop';
+  if (itemId.startsWith('rakuten_')) return 'rakuten';
+  if (itemId.startsWith('yahoo_')) return 'yahoo_auction';
+  if (itemId.startsWith('hardoff_')) return 'hardoff';
+  if (itemId.startsWith('yshopping_')) return 'yahoo_shopping';
+  if (itemId.startsWith('amazon_')) return 'amazon';
+  if (/^m[a-zA-Z0-9]+$/.test(itemId)) return 'mercari';
+  return 'rakuma';
+}
+
+// CSV用にフィールドをエスケープ（全フィールドをクォートで囲む）
+function csvEscape(value) {
+  const str = String(value);
+  return '"' + str.replace(/"/g, '""') + '"';
+}
+
+// 2桁ゼロ埋め
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+// ファイル名用のタイムスタンプ（YYYYMMDD_HHMMSS）
+function formatFilenameTimestamp(date) {
+  return (
+    date.getFullYear() +
+    pad2(date.getMonth() + 1) +
+    pad2(date.getDate()) +
+    '_' +
+    pad2(date.getHours()) +
+    pad2(date.getMinutes()) +
+    pad2(date.getSeconds())
+  );
+}
+
+// 人間可読なローカル日時（YYYY-MM-DD HH:MM:SS）
+function formatViewedAt(timestampMs) {
+  const d = new Date(timestampMs);
+  return (
+    d.getFullYear() + '-' +
+    pad2(d.getMonth() + 1) + '-' +
+    pad2(d.getDate()) + ' ' +
+    pad2(d.getHours()) + ':' +
+    pad2(d.getMinutes()) + ':' +
+    pad2(d.getSeconds())
+  );
+}
+
+// 閲覧履歴をCSVでエクスポート
+async function exportItems() {
+  const items = await window.MichattaStorage.getViewedItems();
+  const ids = Object.keys(items);
+
+  if (ids.length === 0) {
+    showStatus('エクスポートする履歴がありません', true);
+    return;
+  }
+
+  // 新しい順に並べる
+  ids.sort((a, b) => items[b] - items[a]);
+
+  const header = ['id', 'site', 'timestamp_ms', 'viewed_at'].map(csvEscape).join(',');
+  const rows = ids.map((id) => {
+    const ts = items[id];
+    return [id, detectSite(id), ts, formatViewedAt(ts)].map(csvEscape).join(',');
+  });
+
+  // Excel互換のためUTF-8 BOMを付与、改行はCRLF
+  const csv = '﻿' + header + '\r\n' + rows.join('\r\n') + '\r\n';
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'michatta_backup_' + formatFilenameTimestamp(new Date()) + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+  showStatus(`${ids.length}件をエクスポートしました`);
+}
+
 // アラート設定を保存
 async function saveAlertSettings() {
   const settings = {
@@ -226,6 +311,7 @@ document.getElementById('registerBtn').addEventListener('click', registerItems);
 document.getElementById('saveAlertBtn').addEventListener('click', saveAlertSettings);
 document.getElementById('unlockBtn').addEventListener('click', unlockPremium);
 document.getElementById('clearAllBtn').addEventListener('click', clearAllItems);
+document.getElementById('exportBtn').addEventListener('click', exportItems);
 
 // 初期化
 async function init() {
