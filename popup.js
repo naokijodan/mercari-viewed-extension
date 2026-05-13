@@ -65,10 +65,37 @@ function extractItemId(input) {
   const amazonMatch = input.match(/amazon\.co\.jp\/(?:.*\/)?(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i);
   if (amazonMatch) return 'amazon_' + amazonMatch[1].toUpperCase();
 
-  // IDのみの場合（mで始まるメルカリ商品ID）
-  if (/^m[a-zA-Z0-9]+$/.test(input)) {
-    return input;
-  }
+  // === ID 単体入力の判定（URL 抽出に失敗した場合のフォールバック）===
+  // 外部システム（一括登録シート、とりこみ君など）から ID のみが渡される場合に対応
+  // 順序が重要: 上から順にマッチを試みる
+
+  // メルカリ通常: m + 11桁数字（公式仕様、後続パターンとの衝突回避のため厳格化）
+  // 例: m12345678901
+  if (/^m[0-9]{11}$/.test(input)) return input;
+
+  // メルカリショップ: 22文字英数字（大文字含む）
+  // 例: 2JPHJ26x8jFtN7KeEhjufU
+  if (/^[a-zA-Z0-9]{22}$/.test(input) && /[A-Z]/.test(input)) return 'shop_' + input;
+
+  // ラクマ: 32文字16進数（小文字+数字）
+  // 例: dc567a0938651c753ba26edaaef46d2b
+  if (/^[a-f0-9]{32}$/.test(input)) return input;
+
+  // Amazon ASIN: B0 + 8文字英数字（URL 側と整合: /i フラグで大文字小文字許容、保存時に大文字化）
+  // 例: B0FWBGYGMB / b0fwbgygmb
+  if (/^B0[A-Z0-9]{8}$/i.test(input)) return 'amazon_' + input.toUpperCase();
+
+  // PayPayフリマ: z + 9桁数字
+  // 例: z608386256
+  if (/^z[0-9]{9}$/.test(input)) return 'paypay_' + input;
+
+  // ヤフオク: 小文字 a-y + 10桁数字（z 始まりは上の PayPay で先取り済み）
+  // 例: b1229521043
+  if (/^[a-y][0-9]{10}$/.test(input)) return 'yahoo_' + input;
+
+  // ハードオフ: 6〜10桁の数字（短すぎる/長すぎる数字の誤登録防止）
+  // 例: 6142482
+  if (/^[0-9]{6,10}$/.test(input)) return 'hardoff_' + input;
 
   return null;
 }
